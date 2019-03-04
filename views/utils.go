@@ -8,6 +8,7 @@ import (
 	"math/rand"
 	"path"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -28,8 +29,8 @@ type UploadFuncInfo struct {
 }
 
 type UploadFileCoverageInfo struct {
-	FileInfo   UploadFileInfo   `json:"file_info"`
-	FuncDetail []UploadFuncInfo `json:"func_detail"`
+	FileInfo       UploadFileInfo   `json:"file_info"`
+	FuncDetailList []UploadFuncInfo `json:"func_detail"`
 }
 
 type UploadCoverage struct {
@@ -37,7 +38,61 @@ type UploadCoverage struct {
 	TestId           string                   `json:"test_id"`
 	Product          string                   `json:"product"`
 	Mode             string                   `json:"mode"`
-	IP               string                   `json:"ip"`
+}
+
+type ConfigureJsonSubItem struct {
+	Version string   `json:"version"`
+	IpList  []string `json:"ip_list"`
+}
+
+type ConfigureJsonSubItems []ConfigureJsonSubItem
+
+func (conf ConfigureJsonSubItems) Len() int {
+	return len(conf)
+}
+
+func (conf ConfigureJsonSubItems) Less(i, j int) bool {
+	return VersionCompare(conf[i].Version, conf[j].Version) < 0
+}
+
+func VersionCompare(version1, version2 string) int {
+	version1Nos := strings.Split(version1, ".")
+	version2Nos := strings.Split(version2, ".")
+
+	if len(version1Nos) != len(version2Nos) {
+		fmt.Println("版本格式错误，应该是xxx.xxx.xxx等以.隔开的格式")
+		return 0
+	}
+
+	for index, version1No := range version1Nos {
+		no1, err := strconv.Atoi(version1No)
+		if err != nil {
+			fmt.Println("版本格式错误，版本信息只能包含有效数字")
+			return 0
+		}
+
+		no2, err := strconv.Atoi(version2Nos[index])
+		if err != nil {
+			fmt.Println("版本格式错误，版本信息只能包含有效数字")
+			return 0
+		}
+
+		if no1 < no2 {
+			return -1
+		} else if no1 > no2 {
+			return 1
+		}
+	}
+	return 0
+}
+
+func (conf ConfigureJsonSubItems) Swap(i, j int) {
+	conf[i], conf[j] = conf[j], conf[i]
+}
+
+type ConfigurationJson struct {
+	TestData ConfigureJsonSubItems `json:"test_data"`
+	DiffData ConfigureJsonSubItems `json:"diff_data"`
 }
 
 func CreateTestNo() string {
@@ -54,7 +109,7 @@ func random(min, max int) int {
 
 func ReportModuleInfo(moduleName, version, processName, status string) (moduleId int32) {
 	findModule := models.FindModule(map[string]interface{}{
-		"module_name": moduleName,  "version": version, "process_name": processName,
+		"module_name": moduleName, "version": version, "process_name": processName,
 	})
 	if findModule.ModuleId > 0 {
 		return findModule.ModuleId
@@ -74,10 +129,10 @@ func ReportFileInfo(uploadFileInfo *UploadFileInfo, testId, moduleId int32) (fil
 		fmt.Println(err.Error())
 		return 0;
 	}
-	revisionDiff, err := strconv.Atoi(uploadFileInfo.Revision)
+	revisionDiff, err := strconv.Atoi(uploadFileInfo.RevisionDiff)
 	if err != nil {
-		fmt.Println(err.Error())
-		return 0;
+		//revision diff不是有效的数字时，使用默认的0
+		revisionDiff = 0
 	}
 
 	findFile := models.FindFile(map[string]interface{}{
@@ -150,7 +205,7 @@ func ReportCoverageInfo(coverageInfo *UploadCoverage) error {
 	test := models.GetSingleTestById(int32(testId))
 	for _, fileCoverageInfo := range coverageInfo.CoverageDataList {
 		fileInfo := fileCoverageInfo.FileInfo
-		funcDetails := fileCoverageInfo.FuncDetail
+		funcDetails := fileCoverageInfo.FuncDetailList
 		moduleId := ReportModuleInfo(fileInfo.ModuleName, test.Version, "", "")
 		if moduleId <= 0 {
 			logs.Error("failed to report module info.")
@@ -164,6 +219,58 @@ func ReportCoverageInfo(coverageInfo *UploadCoverage) error {
 		if ReportFuncDetails(funcDetails, int32(testId), moduleId, fileId, fileInfo.ModuleName, fileInfo.RelPath) != nil {
 			logs.Error("failed to report function info.")
 			return errors.New("failed to report function info.")
+		}
+	}
+	return nil
+}
+
+func IntArrayToString(a []int, delim string) string {
+	return strings.Trim(strings.Replace(fmt.Sprint(a), " ", delim, -1), "[]")
+}
+
+type SvnDiffItem struct {
+	AnchorLineList  [][3]int `json:"anchor_line_list"`
+	RelPath         string   `json:"rel_path"`
+	ChangedLineList []int    `json:"changed_line_list"`
+}
+
+type SvnDiffInfo struct {
+	DiffInfo []SvnDiffItem ``
+}
+
+func GetSvnDiffInfo(newVersionSvnPath, oldVersionSvnPath string) *SvnDiffInfo {
+	// TODO
+	var svnDiffInfo SvnDiffInfo
+	return &svnDiffInfo
+}
+
+func GetRevisionFromVersion(version string) string {
+	tests := models.GetTestsByVersion(version)
+	if len(tests) <= 0 {
+		return ""
+	}
+
+	fileInfos := models.GetFilesByTestId(tests[0].TestId)
+	if len(fileInfos) <= 0 {
+		return ""
+	}
+
+	return strconv.Itoa(int(fileInfos[0].Revision))
+}
+
+func GetRevisionFromTestId(testId int32) string {
+	fileInfos := models.GetFilesByTestId(testId)
+	if len(fileInfos) <= 0 {
+		return ""
+	}
+
+	return strconv.Itoa(int(fileInfos[0].Revision))
+}
+
+func FindSvnDiffItemFromRelPath(svnDiffInfo *SvnDiffInfo, relPath string) *SvnDiffItem {
+	for _, diffItem := range svnDiffInfo.DiffInfo {
+		if diffItem.RelPath == relPath {
+			return &diffItem
 		}
 	}
 	return nil

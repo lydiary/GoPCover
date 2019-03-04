@@ -34,6 +34,12 @@ func GetSingleFileById(id int32) File {
 	return file
 }
 
+func GetFilesByTestId(testId int32) Files {
+	var files Files
+	dbInstance.Find(&files, "test_id = ?", testId)
+	return files
+}
+
 func AddFile(file *File) {
 	dbInstance.Create(&file)
 }

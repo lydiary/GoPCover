@@ -33,6 +33,12 @@ func GetAllFunctions() Functions {
 	return functions
 }
 
+func GetFunctionsByFileId(fileId int32) Functions {
+	var functions Functions
+	dbInstance.Find(&functions, "file_id = ?", fileId)
+	return functions
+}
+
 func GetSingleFunctionById(id int32) Function {
 	var function Function
 	dbInstance.Where("func_id = ?", id).First(&function)

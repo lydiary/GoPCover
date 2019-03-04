@@ -63,3 +63,19 @@ func FindTest(condition map[string]interface{}) Test {
 	dbInstance.Where(queryString, args...).First(&test)
 	return test
 }
+
+func GetTestsByVersion(version string) Tests {
+	var tests Tests
+	dbInstance.Find(&tests, "version = ?", version)
+	return tests
+}
+
+func GetTestByVersionIp(version, ip string) Test {
+	var test Test
+	dbInstance.Find(&test, "version = ? and ip = ?", version, ip)
+	return test
+}
+
+func UpdateTest(test *Test) {
+	dbInstance.Save(test)
+}

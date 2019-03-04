@@ -2,13 +2,31 @@ package main
 
 import (
 	_ "Coverage/models"
+	"Coverage/utils"
 	"Coverage/views"
+	"encoding/json"
+	"fmt"
 	"github.com/gin-gonic/gin"
+	"github.com/robfig/cron"
 	"log"
+	"strings"
+	"time"
 )
 
+var settings utils.Settings
+
+func init() {
+	settings = utils.GetSettings()
+}
+
 func main() {
-	//gin.SetMode(gin.DebugMode)
+	go crontabService()
+
+	webService()
+}
+
+func webService() {
+	gin.SetMode(gin.DebugMode)
 	router := gin.Default()
 
 	v1 := router.Group("/api/v1")
@@ -35,7 +53,66 @@ func main() {
 
 		v1.POST("/get_test_info", views.GetTestInfo)
 		v1.POST("/parse_coverage_data_list", views.ParseCoverageDataList)
-		v1.GET("/merge_or_diff_coverage/:test_id", views.MergeOrDiffCoverage)
+		//v1.GET("/merge_or_diff_coverage/:test_id", views.MergeOrDiffCoverage)
 	}
 	log.Fatal(router.Run(":8081"))
+}
+
+func crontabService() {
+	c := cron.New()
+
+	spec := durationToCronSpec(settings.CrontabSettings.RedisPersistenceFrequency)
+	c.AddFunc(spec, saveRedisDataToMysql)
+
+	spec = durationToCronSpec(settings.CrontabSettings.RedisCheckCacheFrequency)
+	c.AddFunc(spec, clearRedisCache)
+
+	c.Start()
+}
+
+func durationToCronSpec(duration string) string {
+	spec := ""
+	if strings.HasSuffix(duration, "m") {
+		spec = "0 0/" + duration[:len(duration)-1] + " * * * *"
+	} else if strings.HasSuffix(duration, "h") {
+		spec = "0 0 0/" + duration[:len(duration)-1] + " * * *"
+	} else if strings.HasSuffix(duration, "s") {
+		spec = "0/" + duration[:len(duration)-1] + " * * * * *"
+	} else if strings.HasSuffix(duration, "d") {
+		spec = "0 0 0 0/" + duration[:len(duration)-1] + " * *"
+	}
+	return spec
+}
+
+func saveRedisDataToMysql() {
+	for _, key := range views.RedisClient.Keys("test-*") {
+		var redisData views.RedisDataFormat
+		serializedData, _ := views.RedisClient.GetValue(key)
+		json.Unmarshal([]byte(serializedData), &redisData)
+
+		if redisData.IsUpdated {
+			fmt.Println("saving data to database: ", redisData)
+			redisData.IsUpdated = false
+			views.RedisClient.SetValue(key, redisData)
+			views.ReportCoverageInfo(&redisData.CoverageInfo)
+		}
+	}
+}
+
+func clearRedisCache() {
+	for _, key := range views.RedisClient.Keys("test-*") {
+		var redisData views.RedisDataFormat
+		serializedData, _ := views.RedisClient.GetValue(key)
+		json.Unmarshal([]byte(serializedData), &redisData)
+
+		//计算超时时间
+		now := time.Now()
+		expire := now.Sub(redisData.UpdateTime)
+		mostDuration, _ := time.ParseDuration(settings.CrontabSettings.RedisClearCacheTimeout)
+
+		if !redisData.IsUpdated && mostDuration < expire {
+			fmt.Println("clearing unupdated cache: ", redisData)
+			views.RedisClient.DeleteValue(key)
+		}
+	}
 }

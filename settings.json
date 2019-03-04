@@ -1,0 +1,11 @@
+{
+  "redis": {
+    "host": "localhost",
+    "port": 6379
+  },
+  "crontab": {
+    "redis_persistence_frequency": "1m",
+    "redis_check_cache_frequency": "61s",
+    "redis_clear_cache_timeout": "24h"
+  }
+}
